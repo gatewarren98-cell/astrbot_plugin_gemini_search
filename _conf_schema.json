@@ -39,13 +39,13 @@
         "description": "截图视窗宽度",
         "type": "int",
         "hint": "100-3840",
-        "default": 1920
+        "default": 1080
     },
     "screenshot_height": {
         "description": "截图视窗高度",
         "type": "int",
         "hint": "100-2160",
-        "default": 1080
+        "default": 2160
     },
     "moderation_before_image_send": {
         "description": "发送截图前是否先让AI进行合规审核",
