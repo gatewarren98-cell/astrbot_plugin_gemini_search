@@ -22,5 +22,50 @@
         "title": "随机选择API Key",
         "description": "启用后，将在可用的API Key中随机选择一个进行调用；禁用则按顺序轮询。",
         "default": false
+    },
+    "screenshot_api_base": {
+        "description": "网页截图服务基础URL",
+        "type": "string",
+        "hint": "默认为 https://screenshotsnap.com/api/screenshot",
+        "default": "https://screenshotsnap.com/api/screenshot"
+    },
+    "screenshot_format": {
+        "description": "截图格式",
+        "type": "string",
+        "hint": "webp 或 png",
+        "default": "webp"
+    },
+    "screenshot_width": {
+        "description": "截图视窗宽度",
+        "type": "int",
+        "hint": "100-3840",
+        "default": 1920
+    },
+    "screenshot_height": {
+        "description": "截图视窗高度",
+        "type": "int",
+        "hint": "100-2160",
+        "default": 1080
+    },
+    "moderation_before_image_send": {
+        "description": "发送截图前是否先让AI进行合规审核",
+        "type": "bool",
+        "hint": "开启后，若审核判定为 BLOCK 将不发送图片并提示用户。",
+        "default": false
+    },
+    "fetch_timeout_seconds": {
+        "description": "网络请求超时时间（秒）",
+        "type": "float",
+        "default": 20
+    },
+    "fetch_user_agent": {
+        "description": "抓取网页时的User-Agent",
+        "type": "string",
+        "default": "Mozilla/5.0 AstrBot"
+    },
+    "fetch_max_chars": {
+        "description": "返回的最大字符数上限",
+        "type": "int",
+        "default": 20000
     }
 }
