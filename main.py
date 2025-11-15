@@ -70,7 +70,7 @@ class Main(star.Star):
 		# 启用原生 Google Search 工具
 		config = types.GenerateContentConfig(
 			tools=[types.Tool(google_search=types.GoogleSearch())],
-			generation_config=types.GenerationConfig(temperature=0.2),
+			temperature=0.2,
 		)
 
 		prompt = (
