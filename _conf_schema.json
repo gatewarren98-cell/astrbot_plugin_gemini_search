@@ -24,10 +24,14 @@
         "default": false
     },
     "screenshot_api_base": {
-        "description": "网页截图服务基础URL",
-        "type": "string",
-        "hint": "默认为 https://screenshotsnap.com/api/screenshot",
-        "default": "https://screenshotsnap.com/api/screenshot"
+        "description": "网页截图服务基础URL列表（支持多个备用服务）",
+        "type": "list",
+        "hint": "可配置多个截图服务，失败时自动切换。例如: https://screenshotsnap.com/api/screenshot",
+        "default": [
+            "https://screenshotsnap.com/api/screenshot",
+            "https://api.screenshotmachine.com",
+            "https://shot.screenshotapi.net/screenshot"
+        ]
     },
     "screenshot_format": {
         "description": "截图格式",
@@ -67,5 +71,17 @@
         "description": "返回的最大字符数上限",
         "type": "int",
         "default": 20000
+    },
+    "screenshot_retry_rounds": {
+        "description": "截图服务轮换重试轮数(0=不重试只尝试1轮,最多5轮)",
+        "type": "int",
+        "hint": "遍历所有截图服务为1轮,设置重试几轮。0=只尝试1轮,1-5=失败后重试1-5轮",
+        "default": 2
+    },
+    "webshot_analyze_with_gemini": {
+        "description": "webshot_analyze 是否使用插件内 Gemini 分析截图",
+        "type": "bool",
+        "hint": "true=使用插件内Gemini分析截图后返回文字; false=直接返回截图给主模型分析",
+        "default": true
     }
 }
