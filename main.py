@@ -118,33 +118,51 @@ class Main(star.Star):
 
 	@llm_tool("webshot_analyze")
 	async def webshot_analyze(self, event: AstrMessageEvent, url: str, prompt: str = "请根据网页截图进行要点提炼与关键信息抽取，输出条目式结论与可操作建议。") -> str:
-		"""对网页进行截图，并将截图发送给 Gemini 进行分析，返回结构化文本。
+		"""此工具用于对网页进行截图，根据配置选择返回图片给AI模型分析。
 
 		Args:
 			url(string): 网页 URL
 			prompt(string): 对截图的分析提示词（可选）
 
 		Returns:
-			str: 模型对截图的分析文本
+			str: 模型对截图的分析文本，或图片标记（由主模型分析）
 		"""
 		if httpx is None:
 			return "插件缺少依赖 httpx，请在该插件 requirements.txt 中安装后重启。"
+
+		fmt = str(self.config.get("screenshot_format", "webp"))
+		width = int(self.config.get("screenshot_width", 1920))
+		height = int(self.config.get("screenshot_height", 1080))
+		shot_urls = self._build_screenshot_urls(url, fmt=fmt, width=width, height=height)
+
+		try:
+			image_bytes, mime = await self._fetch_screenshot(shot_urls, fmt)
+		except Exception as e:
+			logger.error(f"[webshot_analyze] 截图获取失败: {e}")
+			return f"截图失败：{e}"
+
+		# 检查是否使用插件内Gemini分析
+		use_gemini = bool(self.config.get("webshot_analyze_with_gemini", True))
+		
+		if not use_gemini:
+			# 直接将图片发送给主模型分析
+			logger.info(f"[webshot_analyze] 将截图直接转发给主模型分析")
+			try:
+				# 将图片转为base64发送给用户(主模型会在上下文中看到)
+				import base64
+				base64_str = base64.b64encode(image_bytes).decode('utf-8')
+				await event.send(MessageChain().base64_image(base64_str))
+				return f"已获取网页 {url} 的截图。{prompt}"
+			except Exception as e:
+				logger.error(f"[webshot_analyze] 发送截图失败: {e}")
+				return f"发送截图失败：{e}"
+		
+		# 使用插件内Gemini分析
 		try:
 			client = self._get_client()
 		except Exception as e:
 			logger.error(f"[webshot_analyze] 初始化客户端失败: {e}")
 			return "请先在插件配置中填写有效的 Gemini API Key。"
-
-		fmt = str(self.config.get("screenshot_format", "webp"))
-		width = int(self.config.get("screenshot_width", 1920))
-		height = int(self.config.get("screenshot_height", 1080))
-		shot_url = self._build_screenshot_url(url, fmt=fmt, width=width, height=height)
-
-		try:
-			image_bytes, mime = await self._fetch_screenshot(shot_url, fmt)
-		except Exception as e:
-			logger.error(f"[webshot_analyze] 截图获取失败: {e}")
-			return f"截图失败：{e}"
 
 		try:
 			image_part = self._make_image_part(image_bytes, mime)
@@ -169,9 +187,6 @@ class Main(star.Star):
 	async def webshot_send(self, event: AstrMessageEvent, url: str) -> str:
 		"""对网页进行截图，并直接发送截图给用户。
 
-		当配置项 `moderation_before_image_send` 为 True 时，将先调用 Gemini 对图片进行合规审核，
-		若判定为 BLOCK 则不发送图片并提示用户；否则发送图片。
-
 		Args:
 			url(string): 网页 URL
 		"""
@@ -181,7 +196,7 @@ class Main(star.Star):
 		fmt = str(self.config.get("screenshot_format", "webp"))
 		width = int(self.config.get("screenshot_width", 1920))
 		height = int(self.config.get("screenshot_height", 1080))
-		shot_url = self._build_screenshot_url(url, fmt=fmt, width=width, height=height)
+		shot_urls = self._build_screenshot_urls(url, fmt=fmt, width=width, height=height)
 
 		should_moderate = bool(self.config.get("moderation_before_image_send", False))
 		if should_moderate:
@@ -191,7 +206,7 @@ class Main(star.Star):
 				logger.error(f"[webshot_send] 初始化客户端失败: {e}")
 				return "请先在插件配置中填写有效的 Gemini API Key。"
 			try:
-				image_bytes, mime = await self._fetch_screenshot(shot_url, fmt)
+				image_bytes, mime = await self._fetch_screenshot(shot_urls, fmt)
 				image_part = self._make_image_part(image_bytes, mime)
 				check_prompt = (
 					"你是合规审核器。请仅输出一个词：ALLOW 或 BLOCK。"
@@ -212,9 +227,10 @@ class Main(star.Star):
 				return f"审核失败：{e}"
 
 		# 发送网络图片 URL（平台适配层会下载或转发）
+		# 注意：这里发送的是第一个服务的URL，实际下载会自动轮换
 		try:
-			await event.send(MessageChain().url_image(shot_url))
-			return f"截图已发送：{shot_url}"
+			await event.send(MessageChain().url_image(shot_urls[0]))
+			return f"截图已发送（使用 {len(shot_urls)} 个备用服务）"
 		except Exception as e:
 			logger.error(f"[webshot_send] 发送失败: {e}")
 			return f"发送失败：{e}"
@@ -248,27 +264,82 @@ class Main(star.Star):
 		self._clients[key] = client
 		return client
 
-	def _build_screenshot_url(self, page_url: str, fmt: str = "webp", width: int = 1920, height: int = 1080) -> str:
-		"""构建截图服务 URL。默认使用 screenshotsnap.com。"""
-		base = self.config.get(
-			"screenshot_api_base", "https://screenshotsnap.com/api/screenshot"
+	def _build_screenshot_urls(self, page_url: str, fmt: str = "webp", width: int = 1920, height: int = 1080) -> list[str]:
+		"""构建所有配置的截图服务 URL 列表。"""
+		bases = self.config.get(
+			"screenshot_api_base", 
+			["https://screenshotsnap.com/api/screenshot"]
 		)
+		# 兼容旧配置：如果是字符串则转为列表
+		if isinstance(bases, str):
+			bases = [bases]
+		
 		params = {
 			"url": page_url,
 			"format": fmt,
 			"width": width,
 			"height": height,
 		}
-		return f"{base}?{urlencode(params)}"
+		query_string = urlencode(params)
+		return [f"{base}?{query_string}" for base in bases]
 
-	async def _fetch_screenshot(self, shot_url: str, fmt: str) -> tuple[bytes, str]:
-		"""下载截图字节与 mime。"""
+	async def _fetch_screenshot(self, shot_urls: list[str], fmt: str) -> tuple[bytes, str]:
+		"""下载截图字节与 mime，支持多服务轮换重试。
+		
+		策略：每轮遍历所有配置的截图服务，失败后进入下一轮重试。
+		例如：2个服务，2轮重试 = 服务1→服务2→服务1→服务2（最多4次尝试）
+		"""
 		mime = "image/webp" if fmt.lower() == "webp" else "image/png"
 		timeout = float(self.config.get("fetch_timeout_seconds", 20))
-		async with httpx.AsyncClient(timeout=timeout) as client:
-			resp = await client.get(shot_url)
-			resp.raise_for_status()
-			return resp.content, mime
+		
+		# 获取重试轮数配置（0=不重试只1轮，1-5=重试1-5轮）
+		retry_rounds = int(self.config.get("screenshot_retry_rounds", 2))
+		retry_rounds = max(0, min(5, retry_rounds))  # 限制在0-5之间
+		total_rounds = retry_rounds + 1  # 首次尝试 + 重试轮数
+		
+		if not shot_urls:
+			raise RuntimeError("没有配置截图服务")
+		
+		all_errors = []  # 记录所有失败
+		total_attempts = 0
+		
+		# 多轮遍历所有服务
+		for round_num in range(1, total_rounds + 1):
+			if round_num > 1:
+				logger.info(f"[webshot] ====== 开始第 {round_num}/{total_rounds} 轮重试 ======")
+				await asyncio.sleep(1.5)  # 轮次间隔
+			
+			# 遍历所有截图服务
+			for service_idx, shot_url in enumerate(shot_urls, 1):
+				total_attempts += 1
+				service_name = shot_url.split('//')[1].split('/')[0] if '//' in shot_url else shot_url[:30]
+				
+				if round_num == 1:
+					logger.info(f"[webshot] 尝试服务 {service_idx}/{len(shot_urls)}: {service_name}")
+				else:
+					logger.info(f"[webshot] 第{round_num}轮 - 服务 {service_idx}/{len(shot_urls)}: {service_name}")
+				
+				try:
+					async with httpx.AsyncClient(timeout=timeout) as client:
+						resp = await client.get(shot_url)
+						resp.raise_for_status()
+						
+						if total_attempts > 1:
+							logger.info(f"[webshot] ✓ 截图成功！服务: {service_name}（第{round_num}轮第{service_idx}个服务）")
+						return resp.content, mime
+						
+				except Exception as e:
+					error_msg = f"第{round_num}轮-服务{service_idx}({service_name}): {str(e)[:80]}"
+					all_errors.append(error_msg)
+					logger.warning(f"[webshot] ✗ {error_msg}")
+					await asyncio.sleep(0.5)  # 服务间短暂延迟
+		
+		# 所有轮次都失败了
+		error_summary = "\n  ".join(all_errors[-6:])  # 显示最后6个错误
+		raise RuntimeError(
+			f"所有截图服务在 {total_rounds} 轮尝试中均失败（共 {total_attempts} 次尝试）。\n"
+			f"最近的错误:\n  {error_summary}"
+		)
 
 	async def _fetch_page_text(self, url: str) -> Optional[str]:
 		"""抓取网页并提取纯文本。"""
