@@ -1,6 +1,6 @@
 name: astrbot_plugin_gemini_search
 desc: Gemini 搜索 + 网页抓取/截图分析/截图直发 的函数工具集
 help: 提供联网搜索、网页文本抓取、网页截图分析、以及截图直发（可选AI审核）
-version: v1.1.0
+version: v1.2.0
 author: Chris
 repo: https://github.com/Chris95743/astrbot_plugin_gemini_search
