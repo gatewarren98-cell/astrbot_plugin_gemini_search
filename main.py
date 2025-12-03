@@ -145,17 +145,26 @@ class Main(star.Star):
 		use_gemini = bool(self.config.get("webshot_analyze_with_gemini", True))
 		
 		if not use_gemini:
-			# 直接将图片发送给主模型分析
-			logger.info(f"[webshot_analyze] 将截图直接转发给主模型分析")
+			# 直接将图片注入到主模型的请求上下文中
+			logger.info(f"[webshot_analyze] 将截图注入到主模型请求上下文中进行分析")
 			try:
-				# 将图片转为base64发送给用户(主模型会在上下文中看到)
 				import base64
 				base64_str = base64.b64encode(image_bytes).decode('utf-8')
-				await event.send(MessageChain().base64_image(base64_str))
-				return f"已获取网页 {url} 的截图。{prompt}"
+				# 获取当前的 ProviderRequest 并添加图片
+				req = event.get_extra("provider_request")
+				if req is not None:
+					# 使用 base64:// 前缀，框架会自动处理
+					req.image_urls.append(f"base64://{base64_str}")
+					logger.info(f"[webshot_analyze] 成功将截图注入到 ProviderRequest.image_urls 中")
+					return f"已获取网页 {url} 的截图并注入到上下文中。请根据截图内容回答用户问题。{prompt}"
+				else:
+					# 如果获取不到 ProviderRequest，回退到发送给用户
+					logger.warning("[webshot_analyze] 无法获取 ProviderRequest，回退到发送图片给用户")
+					await event.send(MessageChain().base64_image(base64_str))
+					return f"已获取网页 {url} 的截图（已发送给用户）。{prompt}"
 			except Exception as e:
-				logger.error(f"[webshot_analyze] 发送截图失败: {e}")
-				return f"发送截图失败：{e}"
+				logger.error(f"[webshot_analyze] 注入截图失败: {e}")
+				return f"注入截图失败：{e}"
 		
 		# 使用插件内Gemini分析
 		try:
