@@ -81,7 +81,7 @@
     "webshot_analyze_with_gemini": {
         "description": "webshot_analyze 是否使用插件内 Gemini 分析截图",
         "type": "bool",
-        "hint": "true=使用插件内Gemini分析截图后返回文字; false=直接返回截图给主模型分析",
+        "hint": "开启使用插件内Gemini分析截图后返回文字结果; 关闭则将截图注入到主模型上下文，由主模型直接分析图片",
         "default": true
     }
 }
